@@ -184,7 +184,7 @@ jobs:
       - name: Clean emsdk cache if needed
         run: |
           if [ -d "emsdk-cache/emsdk-main/upstream/emscripten/cache/build" ]; then
-            rm -rf emsdk-cache/emsdk-main/upstream/emsc cache rebuild:
+          rm -rf emsdk-cache/emsdk-main/upstream/emsc cache rebuild:
 
             
       - name: Cache emsdk
