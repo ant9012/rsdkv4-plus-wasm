@@ -188,6 +188,13 @@ jobs:
           path: emsdk-cache
           key: emsdk-latest
 
+
+      - name: Clean emsdk cache if needed
+        run: |
+          if [ -d "emsdk-cache/emsdk-main/upstream/emscripten/cache/build" ]; then
+            rm -rf emsdk-cache/emsdk-main/upstream/emscripten/cache/build
+          fi
+
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
