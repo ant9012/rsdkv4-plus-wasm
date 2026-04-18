@@ -52,23 +52,8 @@ bool disableEnhancedScaling = false;
 bool bilinearScaling = false;
 #endif
 
-void CheckGLError(const char *where) {
-#if RETRO_USING_OPENGL
-    GLenum err = glGetError();
-    if (err != GL_NO_ERROR) {
-        PrintLog("OpenGL error at %s: 0x%04x", where, err);
-    }
-#endif
-}
-
 int InitRenderDevice()
 {
-	#ifdef __EMSCRIPTEN__
-    // fixes a bug, tho - menus will be a bit pixelated :(
-    // (if engine scales > 2, the game wont render at all)
-    if (Engine.windowScale > 2)
-        Engine.windowScale = 2;
-#endif
     char gameTitle[0x40];
 
     sprintf(gameTitle, "%s%s", Engine.gameWindowText, Engine.usingDataFile_Config ? "" : "");
@@ -220,14 +205,12 @@ int InitRenderDevice()
     SDL_GL_SetSwapInterval(Engine.vsync ? 1 : 0);
 
 #if RETRO_PLATFORM != RETRO_ANDROID && RETRO_PLATFORM != RETRO_OSX
-#ifndef __EMSCRIPTEN__
     GLenum err = glewInit();
     if (err != GLEW_OK && err != GLEW_ERROR_NO_GLX_DISPLAY) {
         PrintLog("glew init error:");
         PrintLog((const char *)glewGetErrorString(err));
         return false;
     }
-#endif
 #endif
 
     displaySettings.unknown2 = 0;
@@ -269,12 +252,7 @@ int InitRenderDevice()
 
     float lightAmbient[4] = { 2.0, 2.0, 2.0, 1.0 };
     float lightDiffuse[4] = { 1.0, 1.0, 1.0, 1.0 };
-    #ifdef __EMSCRIPTEN__
-    // emscripten's legacy gl lighting was being weird, so here's some magic values
-    float lightPos[4] = { 0.35, 0.0, -1.0, 0.0 };
-#else
-    float lightPos[4] = { 0.0, 0.0, 0.0, 1.0 };
-#endif
+    float lightPos[4]     = { 0.0, 0.0, 0.0, 1.0 };
 
     glLightfv(GL_LIGHT0, GL_AMBIENT, lightAmbient);
     glLightfv(GL_LIGHT0, GL_DIFFUSE, lightDiffuse);
@@ -338,10 +316,18 @@ void FlipScreen()
     }
 
 #if RETRO_USING_OPENGL
+
+#if !RETRO_USE_ORIGINAL_CODE
     if (dimAmount < 1.0 && stageMode != STAGEMODE_PAUSED)
         DrawRectangle(0, 0, SCREEN_XSIZE, SCREEN_YSIZE, 0, 0, 0, 0xFF - (dimAmount * 0xFF));
-
-    TransferRetroBuffer();
+#endif
+    if (Engine.gameMode == ENGINE_VIDEOWAIT) {
+        FlipScreenVideo();
+    }
+    else {
+        TransferRetroBuffer();
+        // RenderFromRetroBuffer();
+    }
 #endif
 
 #if RETRO_SOFTWARE_RENDER && !RETRO_USING_OPENGL
@@ -506,7 +492,6 @@ void FlipScreen()
         }
     }
     else {
-        SDL_RenderSetLogicalSize(Engine.renderer, SCREEN_XSIZE, SCREEN_YSIZE);
         SDL_RenderCopy(Engine.renderer, Engine.videoBuffer, NULL, destScreenPos);
     }
 
@@ -533,7 +518,6 @@ void FlipScreen()
         // Apply dimming
         // In RSDKv3, a DrawRectangle would be used for the fade - but I believe that it doesn't draw to the videoBuffer?
         int fade = Engine.gameMode == ENGINE_VIDEOWAIT ? fadeMode : 0xFF - (dimAmount * 0xFF);
-        SDL_SetRenderDrawBlendMode(Engine.renderer, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(Engine.renderer, 0, 0, 0, fade);
 
         if (dimAmount < 1.0 || Engine.gameMode == ENGINE_VIDEOWAIT)
@@ -592,14 +576,6 @@ void FlipScreen()
 
 #endif // !RETRO_SOFTWARE_RENDER
 
-// commented out since it'll most likely conflict with ProcessVideo()
-// #if RETRO_USING_OPENGL
-//     if (Engine.gameMode != ENGINE_VIDEOWAIT) {
-//        if (dimAmount < 1.0 && stageMode != STAGEMODE_PAUSED)
-//            DrawRectangle(0, 0, SCREEN_XSIZE, SCREEN_YSIZE, 0, 0, 0, 0xFF - (dimAmount * 0xFF));
-//    }
-// #endif // !RETRO_USING_OPENGL
-
 #endif
 }
 
@@ -620,9 +596,60 @@ struct DrawVertexCD {
 void FlipScreenVideo()
 {
 #if RETRO_USING_OPENGL
-    // Video frames are rendered into Engine.frameBuffer by ProcessVideo()
-    // and displayed through the normal TransferRetroBuffer() pipeline.
-    // Nothing to do here.
+    // Use the real display dimensions — viewWidth/viewHeight are never assigned.
+    int dw = displaySettings.width;
+    int dh = displaySettings.height;
+
+    // Scale video to fit the display, preserving aspect ratio.
+    float best = minVal(dw / (float)videoWidth, dh / (float)videoHeight);
+
+    float vw = videoWidth  * best;
+    float vh = videoHeight * best;
+
+    // Convert to NDC: map [0,dw] -> [-1,1] and [0,dh] -> [1,-1].
+    float x0 = (((dw - vw) * 0.5f) / dw) * 2.0f - 1.0f;
+    float y0 = 1.0f - (((dh - vh) * 0.5f) / dh) * 2.0f;
+    float x1 = x0 + (vw / dw) * 2.0f;
+    float y1 = y0 - (vh / dh) * 2.0f;
+
+    // Plain float position and UV arrays — no DrawVertexCD shorts.
+    // Layout per vertex: [x, y,  u, v]
+    //  0 = top-left, 1 = top-right, 2 = bottom-left, 3 = bottom-right
+    float verts[4][2] = { {x0, y0}, {x1, y0}, {x0, y1}, {x1, y1} };
+    float uvs[4][2]   = { {0.f, 0.f}, {1.f, 0.f}, {0.f, 1.f}, {1.f, 1.f} };
+    static const GLushort idx[6] = { 2, 1, 0, 2, 3, 1 };
+
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Push an identity projection so NDC coords work directly.
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glViewport(displaySettings.offsetX, 0, dw, dh);
+
+    glBindTexture(GL_TEXTURE_2D, videoBuffer);
+    glDisable(GL_BLEND);
+
+    glEnableClientState(GL_VERTEX_ARRAY);
+    glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+
+    glVertexPointer(2, GL_FLOAT, 0, verts);
+    glTexCoordPointer(2, GL_FLOAT, 0, uvs);
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, idx);
+
+    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    glDisableClientState(GL_VERTEX_ARRAY);
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glPopMatrix();
 #endif
 }
 
