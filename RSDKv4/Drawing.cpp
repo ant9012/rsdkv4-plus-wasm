@@ -52,8 +52,23 @@ bool disableEnhancedScaling = false;
 bool bilinearScaling = false;
 #endif
 
+void CheckGLError(const char *where) {
+#if RETRO_USING_OPENGL
+    GLenum err = glGetError();
+    if (err != GL_NO_ERROR) {
+        PrintLog("OpenGL error at %s: 0x%04x", where, err);
+    }
+#endif
+}
+
 int InitRenderDevice()
 {
+	#ifdef __EMSCRIPTEN__
+    // fixes a bug, tho - menus will be a bit pixelated :(
+    // (if engine scales > 2, the game wont render at all)
+    if (Engine.windowScale > 2)
+        Engine.windowScale = 2;
+#endif
     char gameTitle[0x40];
 
     sprintf(gameTitle, "%s%s", Engine.gameWindowText, Engine.usingDataFile_Config ? "" : "");
@@ -205,12 +220,14 @@ int InitRenderDevice()
     SDL_GL_SetSwapInterval(Engine.vsync ? 1 : 0);
 
 #if RETRO_PLATFORM != RETRO_ANDROID && RETRO_PLATFORM != RETRO_OSX
+#ifndef __EMSCRIPTEN__
     GLenum err = glewInit();
     if (err != GLEW_OK && err != GLEW_ERROR_NO_GLX_DISPLAY) {
         PrintLog("glew init error:");
         PrintLog((const char *)glewGetErrorString(err));
         return false;
     }
+#endif
 #endif
 
     displaySettings.unknown2 = 0;
@@ -252,7 +269,12 @@ int InitRenderDevice()
 
     float lightAmbient[4] = { 2.0, 2.0, 2.0, 1.0 };
     float lightDiffuse[4] = { 1.0, 1.0, 1.0, 1.0 };
-    float lightPos[4]     = { 0.0, 0.0, 0.0, 1.0 };
+    #ifdef __EMSCRIPTEN__
+    // emscripten's legacy gl lighting was being weird, so here's some magic values
+    float lightPos[4] = { 0.35, 0.0, -1.0, 0.0 };
+#else
+    float lightPos[4] = { 0.0, 0.0, 0.0, 1.0 };
+#endif
 
     glLightfv(GL_LIGHT0, GL_AMBIENT, lightAmbient);
     glLightfv(GL_LIGHT0, GL_DIFFUSE, lightDiffuse);
@@ -316,18 +338,10 @@ void FlipScreen()
     }
 
 #if RETRO_USING_OPENGL
-
-#if !RETRO_USE_ORIGINAL_CODE
     if (dimAmount < 1.0 && stageMode != STAGEMODE_PAUSED)
         DrawRectangle(0, 0, SCREEN_XSIZE, SCREEN_YSIZE, 0, 0, 0, 0xFF - (dimAmount * 0xFF));
-#endif
-    if (Engine.gameMode == ENGINE_VIDEOWAIT) {
-        FlipScreenVideo();
-    }
-    else {
-        TransferRetroBuffer();
-        // RenderFromRetroBuffer();
-    }
+
+    TransferRetroBuffer();
 #endif
 
 #if RETRO_SOFTWARE_RENDER && !RETRO_USING_OPENGL
@@ -492,6 +506,7 @@ void FlipScreen()
         }
     }
     else {
+        SDL_RenderSetLogicalSize(Engine.renderer, SCREEN_XSIZE, SCREEN_YSIZE);
         SDL_RenderCopy(Engine.renderer, Engine.videoBuffer, NULL, destScreenPos);
     }
 
@@ -518,6 +533,7 @@ void FlipScreen()
         // Apply dimming
         // In RSDKv3, a DrawRectangle would be used for the fade - but I believe that it doesn't draw to the videoBuffer?
         int fade = Engine.gameMode == ENGINE_VIDEOWAIT ? fadeMode : 0xFF - (dimAmount * 0xFF);
+        SDL_SetRenderDrawBlendMode(Engine.renderer, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(Engine.renderer, 0, 0, 0, fade);
 
         if (dimAmount < 1.0 || Engine.gameMode == ENGINE_VIDEOWAIT)
@@ -576,13 +592,13 @@ void FlipScreen()
 
 #endif // !RETRO_SOFTWARE_RENDER
 
-#if RETRO_USING_OPENGL
-    if (dimAmount < 1.0 && stageMode != STAGEMODE_PAUSED)
-        DrawRectangle(0, 0, SCREEN_XSIZE, SCREEN_YSIZE, 0, 0, 0, 0xFF - (dimAmount * 0xFF));
-
-    if (Engine.gameMode == ENGINE_VIDEOWAIT)
-        FlipScreenVideo();
-#endif // !RETRO_USING_OPENGL
+// commented out since it'll most likely conflict with ProcessVideo()
+// #if RETRO_USING_OPENGL
+//     if (Engine.gameMode != ENGINE_VIDEOWAIT) {
+//        if (dimAmount < 1.0 && stageMode != STAGEMODE_PAUSED)
+//            DrawRectangle(0, 0, SCREEN_XSIZE, SCREEN_YSIZE, 0, 0, 0, 0xFF - (dimAmount * 0xFF));
+//    }
+// #endif // !RETRO_USING_OPENGL
 
 #endif
 }
@@ -604,57 +620,9 @@ struct DrawVertexCD {
 void FlipScreenVideo()
 {
 #if RETRO_USING_OPENGL
-    DrawVertexCD screenVerts[4];
-
-    screenVerts[0].u = 0;
-    screenVerts[0].v = 0;
-
-    screenVerts[1].u = FACEBUFFER_SIZE;
-    screenVerts[1].v = 0;
-
-    screenVerts[2].u = 0;
-    screenVerts[2].v = FACEBUFFER_SIZE;
-
-    screenVerts[3].u = FACEBUFFER_SIZE;
-    screenVerts[3].v = FACEBUFFER_SIZE;
-
-    float best = minVal(viewWidth / (float)videoWidth, viewHeight / (float)videoHeight);
-
-    float w = videoWidth * best;
-    float h = videoHeight * best;
-
-    float x = normalize((viewWidth - w) / 2, 0, viewWidth) * 2 - 1.0f;
-    float y = -(normalize((viewHeight - h) / 2, 0, viewHeight) * 2 - 1.0f);
-
-    w = normalize(w, 0, viewWidth) * 2;
-    h = -(normalize(h, 0, viewHeight) * 2);
-
-    screenVerts[0].x = x;
-    screenVerts[0].y = y;
-
-    screenVerts[1].x = w + x;
-    screenVerts[1].y = y;
-
-    screenVerts[2].x = x;
-    screenVerts[2].y = h + y;
-
-    screenVerts[3].x = w + x;
-    screenVerts[3].y = h + y;
-
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    glLoadIdentity();
-    glBindTexture(GL_TEXTURE_2D, videoBuffer);
-
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    glViewport(viewOffsetX, 0, viewWidth, viewHeight);
-
-    glVertexPointer(2, GL_FLOAT, sizeof(DrawVertexCD), &screenVerts[0].x);
-    glTexCoordPointer(2, GL_FLOAT, sizeof(DrawVertexCD), &screenVerts[0].u);
-
-    glDisable(GL_BLEND);
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, &drawVertexList);
+    // Video frames are rendered into Engine.frameBuffer by ProcessVideo()
+    // and displayed through the normal TransferRetroBuffer() pipeline.
+    // Nothing to do here.
 #endif
 }
 

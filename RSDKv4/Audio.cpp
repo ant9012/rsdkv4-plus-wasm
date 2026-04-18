@@ -1,6 +1,10 @@
 #include "RetroEngine.hpp"
 #include <cmath>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 int globalSFXCount = 0;
 int stageSFXCount  = 0;
 
@@ -15,7 +19,6 @@ bool musicEnabled = 0;
 int musicStatus   = MUSIC_STOPPED;
 int musicStartPos = 0;
 int musicPosition = 0;
-int musicSeekPos  = -1;
 int musicRatio    = 0;
 TrackInfo musicTracks[TRACK_COUNT];
 SFXInfo sfxList[SFX_COUNT];
@@ -49,56 +52,62 @@ SDL_AudioSpec audioDeviceFormat;
 
 int InitAudioPlayback()
 {
-    StopAllSfx(); //"init"
+    StopAllSfx();
 
 #if !RETRO_USE_ORIGINAL_CODE
 #if RETRO_USING_SDL1 || RETRO_USING_SDL2
+
+    if (SDL_WasInit(SDL_INIT_AUDIO) == 0) {
+        if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
+            audioEnabled = false;
+            return true;
+        }
+    }
+
     SDL_AudioSpec want;
+    SDL_memset(&want, 0, sizeof(want));
     want.freq     = AUDIO_FREQUENCY;
     want.format   = AUDIO_FORMAT;
-    want.samples  = AUDIO_SAMPLES;
     want.channels = AUDIO_CHANNELS;
     want.callback = ProcessAudioPlayback;
 
+#ifdef __EMSCRIPTEN__
+    want.samples = 2048;
+#else
+    want.samples = AUDIO_SAMPLES;
+#endif
+
 #if RETRO_USING_SDL2
-    if ((audioDevice = SDL_OpenAudioDevice(nullptr, 0, &want, &audioDeviceFormat, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE)) > 0) {
+    int allowedChanges = 0;
+
+    if ((audioDevice = SDL_OpenAudioDevice(nullptr, 0, &want, &audioDeviceFormat, allowedChanges)) > 0) {
         audioEnabled = true;
         SDL_PauseAudioDevice(audioDevice, 0);
-    }
-    else {
-        PrintLog("Unable to open audio device: %s", SDL_GetError());
-        audioEnabled = false;
-        return true; // no audio but game wont crash now
-    }
 
-    // Init video sound stuff
-    // TODO: Unfortunately, we're assuming that video sound is stereo at 48000Hz.
-    // This is true of every .ogv file in the game (the Steam version, at least),
-    // but it would be nice to make this dynamic. Unfortunately, THEORAPLAY's API
-    // makes this awkward.
-    ogv_stream = SDL_NewAudioStream(AUDIO_F32SYS, 2, 48000, audioDeviceFormat.format, audioDeviceFormat.channels, audioDeviceFormat.freq);
-    if (!ogv_stream) {
-        PrintLog("Failed to create stream: %s", SDL_GetError());
-        SDL_CloseAudioDevice(audioDevice);
-        audioEnabled = false;
-        return true; // no audio but game wont crash now
-    }
-#elif RETRO_USING_SDL1
-    if (SDL_OpenAudio(&want, &audioDeviceFormat) == 0) {
-        audioEnabled = true;
-        SDL_PauseAudio(0);
+        // Create the OGV audio stream for video playback.
+        // THEORAPLAY outputs float32 stereo at 44100 or 48000 Hz.
+        // We create it at 48000 Hz (common for video) and let SDL resample.
+        // If the actual video is 44100 Hz, the slight pitch difference is negligible,
+        // OR we recreate it per-video in PlayVideoFile if we want perfect accuracy.
+        if (ogv_stream) {
+            SDL_FreeAudioStream(ogv_stream);
+            ogv_stream = NULL;
+        }
+        ogv_stream = SDL_NewAudioStream(AUDIO_F32SYS, 2, 48000,
+                                        audioDeviceFormat.format, audioDeviceFormat.channels, audioDeviceFormat.freq);
+        if (!ogv_stream) {
+            PrintLog("Failed to create OGV audio stream: %s", SDL_GetError());
+        }
     }
     else {
-        PrintLog("Unable to open audio device: %s", SDL_GetError());
         audioEnabled = false;
-        return true; // no audio but game wont crash now
+        return true;
     }
-#endif // !RETRO_USING_SDL1
+#endif
 #endif
 #endif
 
     LoadGlobalSfx();
-
     return true;
 }
 
@@ -224,18 +233,6 @@ void ProcessMusicStream(Sint32 *stream, size_t bytes_wanted)
     switch (musicStatus) {
         case MUSIC_READY:
         case MUSIC_PLAYING: {
-            // Properly sets the track position to a specific point (in samples)
-            if (musicSeekPos >= 0) {
-                ov_pcm_seek(&streamInfoPtr->vorbisFile, musicSeekPos);
-#if RETRO_USING_SDL2
-                if (streamInfoPtr->stream) {
-                    SDL_AudioStreamClear(streamInfoPtr->stream);
-                }
-#endif
-                musicPosition = musicSeekPos;
-                musicSeekPos = -1;
-            }
-
 #if RETRO_USING_SDL2
             while (musicStatus == MUSIC_PLAYING && streamInfoPtr->stream && SDL_AudioStreamAvailable(streamInfoPtr->stream) < bytes_wanted) {
                 // We need more samples: get some
@@ -348,8 +345,8 @@ void ProcessAudioPlayback(void *userdata, Uint8 *stream, int len)
 {
     (void)userdata; // Unused
 
-    if (!audioEnabled)
-        return;
+    // if (!audioEnabled)
+    //    return;
 
     Sint16 *output_buffer = (Sint16 *)stream;
 
@@ -681,8 +678,8 @@ void SwapMusicTrack(const char *filePath, byte trackID, uint loopPoint, uint rat
 
 bool PlayMusic(int track, int musStartPos)
 {
-    if (!audioEnabled)
-        return false;
+    // if (!audioEnabled)
+       // return false;
 
     if (musicTracks[track].fileName[0]) {
         if (musicStatus != MUSIC_LOADING) {
@@ -725,8 +722,8 @@ void SetSfxName(const char *sfxName, int sfxID)
 
 void LoadSfx(char *filePath, byte sfxID)
 {
-    if (!audioEnabled)
-        return;
+    // if (!audioEnabled)
+       // return;
 
     FileInfo info;
     char fullPath[0x80];
@@ -1029,7 +1026,7 @@ void ResumeAllVoice()
         if (sfxChannels[i].sfxID >= 0 && sfxChannels[i].isVoice)
             sfxChannels[i].paused = false;
     }
-    
+
     UnlockAudioDevice();
 }
 void PauseAnySfx()
@@ -1039,33 +1036,6 @@ void PauseAnySfx()
         if (sfxChannels[i].sfxID >= 0)
             sfxChannels[i].paused = true;
     }
-    UnlockAudioDevice();
-}
-void StopAllSfx()
-{
-    LockAudioDevice();
-
-    for (int i = 0; i < CHANNEL_COUNT; ++i) {
-        if (!sfxChannels[i].isVoice)
-        {
-            sfxChannels[i].sfxID = -1;
-            sfxChannels[i].paused = false;
-        }
-    }
-
-    UnlockAudioDevice();
-}
-void StopAllVoice()
-{
-    LockAudioDevice();
-
-    for (int i = 0; i < CHANNEL_COUNT; ++i) {
-        if (sfxChannels[i].isVoice) {
-            sfxChannels[i].sfxID = -1;
-            sfxChannels[i].paused = false;
-        }
-    }
-
     UnlockAudioDevice();
 }
 void SetSfxAttributes(int sfx, int loopCount, sbyte pan)
@@ -1110,3 +1080,51 @@ void SetVoiceAttributes(int sfx, int loopCount, sbyte pan)
     sfxInfo->sfxID       = sfx;
     UnlockAudioDevice();
 }
+void CheckAudioContext()
+{
+    if (audioEnabled) return;
+
+#if RETRO_USING_SDL2
+    SDL_AudioSpec want;
+    want.freq     = AUDIO_FREQUENCY;
+    want.format   = AUDIO_FORMAT;
+    want.samples  = AUDIO_SAMPLES;
+    want.channels = AUDIO_CHANNELS;
+    want.callback = ProcessAudioPlayback;
+
+    audioDevice = SDL_OpenAudioDevice(nullptr, 0, &want, &audioDeviceFormat, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
+    if (audioDevice > 0) {
+        audioEnabled = true;
+        SDL_PauseAudioDevice(audioDevice, 0);
+        PrintLog("Audio Context Restored!");
+    }
+#endif
+}
+
+#ifdef __EMSCRIPTEN__
+
+extern "C" {
+    // This is the function we will call from our input loop
+    EMSCRIPTEN_KEEPALIVE void Mono_WakeAudio() {
+        if (audioDevice > 0) {
+            // SDL unpause
+            #if RETRO_USING_SDL2
+                SDL_PauseAudioDevice(audioDevice, 0);
+            #else
+                SDL_PauseAudio(0);
+            #endif
+
+            // Direct JavaScript Resume
+            MAIN_THREAD_EM_ASM({
+                if (window.SDL2 && SDL2.audioContext && SDL2.audioContext.state === 'suspended') {
+                    SDL2.audioContext.resume().then(function() {
+                        console.log("AudioContext resumed successfully.");
+                    });
+                }
+            });
+
+            audioEnabled = true; // Mark as enabled once the user has clicked
+        }
+    }
+}
+#endif

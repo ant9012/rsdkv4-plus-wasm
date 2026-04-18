@@ -13,7 +13,7 @@
     #endif
     
     // Aliases & Old Syntax Aliases
-    #define COMMON_SCRIPT_VAR_COUNT (85 + OLD_SYNTAX_SCRIPT_VAR_COUNT)
+    #define COMMON_SCRIPT_VAR_COUNT (82 + OLD_SYNTAX_SCRIPT_VAR_COUNT)
 #endif
 
 #include "Userdata.hpp"
@@ -446,10 +446,7 @@ const char variableNames[][0x20] = {
     "engine.usernameLength",
     "playtime.hours",
     "playtime.minutes",
-    "playtime.seconds",
-    "mouse.moved",
-    "mouse1.pressed",
-    "mouse2.pressed"
+    "playtime.seconds"
 };
 #endif
 
@@ -680,6 +677,9 @@ const FunctionInfo functions[] = {
     FunctionInfo("SetControllerLEDColour", 4),
     FunctionInfo("CheckControllerConnect", 0),
     FunctionInfo("CheckControllerDisconnect", 0),
+    FunctionInfo("CheckMouseMoved", 0),
+    FunctionInfo("CheckMouseLeftPress", 0),
+    FunctionInfo("CheckMouseRightPress", 0),
 
     // Sound FX
     FunctionInfo("PauseSfx", 1),
@@ -692,8 +692,6 @@ const FunctionInfo functions[] = {
     FunctionInfo("ResumeAllSfx", 0),
     FunctionInfo("PauseAllVoice", 0),
     FunctionInfo("ResumeAllVoice", 0),
-    FunctionInfo("StopAllSfx", 0),
-    FunctionInfo("StopAllVoice", 0),
     FunctionInfo("SetVoiceAttributes", 3),
 
     // Strings
@@ -704,16 +702,13 @@ const FunctionInfo functions[] = {
     FunctionInfo("ConvertByteToString", 3),
     FunctionInfo("GetTextInfo16", 5),	
     FunctionInfo("DrawString", 8),
-    FunctionInfo("DrawStringFX", 9),
 
     // Drawing (NOTE: The first 3 work exactly like their og counter-parts, although you just need to add the FX type on the end)
     FunctionInfo("DrawNumbersFX", 8),
     FunctionInfo("DrawActNameFX", 8),
     FunctionInfo("DrawMenuFX", 4),
-    FunctionInfo("SetClassicFade", 4), // alias of SetClassicFadeOut
     FunctionInfo("SetClassicFadeOut", 4),
     FunctionInfo("SetClassicFadeIn", 4),
-    FunctionInfo("ClassicTint", 8),    // alias of DrawClassicFadeOut
     FunctionInfo("DrawClassicFadeOut", 8),
     FunctionInfo("DrawClassicFadeIn", 8),
 
@@ -1245,9 +1240,6 @@ enum ScrVar {
     VAR_PLAYTIME_HOURS,
     VAR_PLAYTIME_MINUTES,
     VAR_PLAYTIME_SECONDS,
-    VAR_MOUSE_MOVED,
-    VAR_MOUSE1_PRESSED,
-    VAR_MOUSE2_PRESSED,
     VAR_MAX_CNT
 };
 
@@ -1436,6 +1428,9 @@ enum ScrFunc {
     FUNC_SETCONTROLLERLEDCOLOUR,
     FUNC_CHECKCONTROLLERCONNECT,
     FUNC_CHECKCONTROLLERDISCONNECT,
+    FUNC_CHECKMOUSEMOVED,
+    FUNC_CHECKMOUSE1PRESS,
+    FUNC_CHECKMOUSE2PRESS,
 
     // Sound FX
     FUNC_PAUSESFX,
@@ -1448,8 +1443,6 @@ enum ScrFunc {
     FUNC_RESUMEALLSFX,
     FUNC_PAUSEALLVOICE,
     FUNC_RESUMEALLVOICE,
-    FUNC_STOPALLSFX,
-    FUNC_STOPALLVOICE,
     FUNC_SETVOICEATTRIBUTES,
 
     // Strings
@@ -1460,16 +1453,13 @@ enum ScrFunc {
     FUNC_CONVERTBYTETOSTRING,
     FUNC_GETTEXTINFO_16,
     FUNC_DRAWSTRING,
-    FUNC_DRAWSTRINGFX,
 
     // Drawing
     FUNC_DRAWNUMBERSFX,
     FUNC_DRAWACTNAMEFX,
     FUNC_DRAWMENUFX,
-    FUNC_SETCLASSICFADE,
     FUNC_SETCLASSICFADEOUT,
     FUNC_SETCLASSICFADEIN,
-    FUNC_CLASSICTINT,
     FUNC_DRAWCLASSICOUT,
     FUNC_DRAWCLASSICIN,
 
@@ -3365,19 +3355,11 @@ void ParseScriptFile(char *scriptName, int scriptID)
 
     FileInfo info;
     char scriptPath[0x40];
-    bool scriptsFound = true;
 
     // Try the original script folder
     StrCopy(scriptPath, "Data/Scripts/");
     StrAdd(scriptPath, scriptName);
-    if (!LoadFile(scriptPath, &info)) {
-        // Try Scripts/ outside Data/
-        StrCopy(scriptPath, "Scripts/");
-        StrAdd(scriptPath, scriptName);
-        scriptsFound = LoadFile(scriptPath, &info);
-    }
-    
-    if (scriptsFound) {
+    if (LoadFile(scriptPath, &info)) {
         int readMode   = READMODE_NORMAL;
         int parseMode  = PARSEMODE_SCOPELESS;
         char prevChar  = 0;
@@ -4662,12 +4644,12 @@ void ProcessScript(int scriptCodeStart, int jumpTableStart, byte scriptEvent)
                     case VAR_STAGEPLAYERLISTPOS: scriptEng.operands[i] = playerListPos; break;
                     case VAR_STAGEDEBUGMODE: scriptEng.operands[i] = debugMode; break;
                     case VAR_STAGEENTITYPOS: scriptEng.operands[i] = objectEntityPos; break;
-                    // for some reason v5U has currentCamera here?? they kinda break tho... but i mean origins uses camera[] anyway
-                    case VAR_SCREENCAMERAENABLED: scriptEng.operands[i] = camera[0].enabled; break;
-                    case VAR_SCREENCAMERATARGET: scriptEng.operands[i] = camera[0].target; break;
-                    case VAR_SCREENCAMERASTYLE: scriptEng.operands[i] = camera[0].style; break;
-                    case VAR_SCREENCAMERAX: scriptEng.operands[i] = camera[0].xpos; break;
-                    case VAR_SCREENCAMERAY: scriptEng.operands[i] = camera[0].ypos; break;
+                    // for some reason v5U has currentCamera here?? i mean sure ig
+                    case VAR_SCREENCAMERAENABLED: scriptEng.operands[i] = camera[curCam].enabled; break;
+                    case VAR_SCREENCAMERATARGET: scriptEng.operands[i] = camera[curCam].target; break;
+                    case VAR_SCREENCAMERASTYLE: scriptEng.operands[i] = camera[curCam].style; break;
+                    case VAR_SCREENCAMERAX: scriptEng.operands[i] = camera[curCam].xpos; break;
+                    case VAR_SCREENCAMERAY: scriptEng.operands[i] = camera[curCam].ypos; break;
                     case VAR_SCREENDRAWLISTSIZE: scriptEng.operands[i] = drawListEntries[arrayVal].listSize; break;
                     case VAR_SCREENXCENTER: scriptEng.operands[i] = SCREEN_CENTERX; break;
                     case VAR_SCREENYCENTER: scriptEng.operands[i] = SCREEN_CENTERY; break;
@@ -4974,33 +4956,6 @@ void ProcessScript(int scriptCodeStart, int jumpTableStart, byte scriptEvent)
                     case VAR_PLAYTIME_HOURS: scriptEng.operands[i] = GetPlaytimeSeconds() / 3600; break;
                     case VAR_PLAYTIME_MINUTES: scriptEng.operands[i] = (GetPlaytimeSeconds() % 3600) / 60; break;
                     case VAR_PLAYTIME_SECONDS: scriptEng.operands[i] = GetPlaytimeSeconds() % 60; break;
-                    case VAR_MOUSE_MOVED: {
-                        static int lastMouseX = -1;
-                        static int lastMouseY = -1;
-                        int mouseX, mouseY;
-
-                        SDL_GetMouseState(&mouseX, &mouseY);
-                        if (lastMouseX != -1 && lastMouseY != -1 && (mouseX != lastMouseX || mouseY != lastMouseY)) {
-                            scriptEng.operands[i] = 1; // Mouse moved
-                        } else {
-                            scriptEng.operands[i] = 0; // Not moved or first check
-                        }
-                        lastMouseX = mouseX;
-                        lastMouseY = mouseY;
-                        break;
-                    }
-
-                    case VAR_MOUSE1_PRESSED: {
-                        int mouseState = SDL_GetMouseState(NULL, NULL);
-                        scriptEng.operands[i] = (mouseState & SDL_BUTTON(SDL_BUTTON_LEFT)) ? 1 : 0;
-                        break;
-                    }
-
-                    case VAR_MOUSE2_PRESSED: {
-                        int mouseState = SDL_GetMouseState(NULL, NULL);
-                        scriptEng.operands[i] = (mouseState & SDL_BUTTON(SDL_BUTTON_RIGHT)) ? 1 : 0;
-                        break;
-                    }
                 }
             }
             else if (opcodeType == SCRIPTVAR_INTCONST) { // int constant
@@ -5079,9 +5034,6 @@ void ProcessScript(int scriptCodeStart, int jumpTableStart, byte scriptEvent)
                 break;
         }
 
-        // btw, if you ever see "opcodeSize = 0;", it means it WON'T change the variables that are set in the function
-        // so if you want to set a variable, remove it. otherwise add it!!
-
         // Functions
         switch (opcode) {
             default: break;
@@ -5092,18 +5044,7 @@ void ProcessScript(int scriptCodeStart, int jumpTableStart, byte scriptEvent)
             case FUNC_INC: ++scriptEng.operands[0]; break;
             case FUNC_DEC: --scriptEng.operands[0]; break;
             case FUNC_MUL: scriptEng.operands[0] *= scriptEng.operands[1]; break;
-            case FUNC_DIV:
-                // if we divide by 0, itll crash!!
-                // so uhh, prevent it here ig? 
-                // the original doesnt do this, so it COULD be used for a v4+ lockout LOL
-                
-                // we could use a ternary operator, but this is cleaner
-                // (btw the ternary operator is the "value ? true : false" thing)
-                if (scriptEng.operands[1] == 0)
-                    scriptEng.operands[0] = 0;
-                else
-                    scriptEng.operands[0] /= scriptEng.operands[1];
-                break;
+            case FUNC_DIV: scriptEng.operands[0] /= scriptEng.operands[1]; break;
             case FUNC_SHR: scriptEng.operands[0] >>= scriptEng.operands[1]; break;
             case FUNC_SHL: scriptEng.operands[0] <<= scriptEng.operands[1]; break;
             case FUNC_AND: scriptEng.operands[0] &= scriptEng.operands[1]; break;
@@ -5791,140 +5732,6 @@ void ProcessScript(int scriptCodeStart, int jumpTableStart, byte scriptEvent)
 					id++;
 				}
             }
-            case FUNC_DRAWSTRINGFX: {
-				/*
-				script operands
-				0 - sprite
-				1- xpos
-				2 - ypos				
-				3 - width of space
-				4 - letter spacing
-				5 - vertical letter spacing
-				6 - menu
-				7 - menu line
-                8 - effect flag
-				
-				*/
-                opcodeSize = 0;
-               // int charID = 0;
-				//int wordoffset = 0;
-				int charxpos = scriptEng.operands[1];
-				int charypos = scriptEng.operands[2];
-				int line = scriptEng.operands[7];
-
-				TextMenu *tMenu = (TextMenu *)&gameMenu[scriptEng.operands[6]];
-				int id          = tMenu->entryStart[line];
-
-				for (int i = 0; i < tMenu->entrySize[line]; ++i) {
-					int character = tMenu->textData[id];
-					if (character == 64) { //@ symbol line breaks
-						charxpos = scriptEng.operands[1];
-						charypos += scriptEng.operands[5];
-					}
-					else {						
-						if (character == ' ')
-							character = -1;							
-						if (character >= 192) //accented characters
-							character -= 94;
-						else if (character >= 33)
-							character -= 33;
-
-						if (character <= -1) {
-							charxpos += scriptEng.operands[3] + scriptEng.operands[4]; // spaceWidth + spacing
-						}
-						else {
-							character += scriptEng.operands[0];
-							spriteFrame = &scriptFrames[scriptInfo->frameListOffset + character];
-							
-							switch (scriptEng.operands[8]) {
-								case FX_SCALE:
-									DrawSpriteScaled(entity->direction, charxpos, charypos, -spriteFrame->pivotX, -spriteFrame->pivotY,
-													entityScaleX, entityScaleY, spriteFrame->width, spriteFrame->height, spriteFrame->sprX, spriteFrame->sprY,
-													scriptInfo->spriteSheetID);
-									break;
-								case FX_ROTATE:
-									DrawSpriteRotated(entity->direction, charxpos, charypos, -spriteFrame->pivotX, -spriteFrame->pivotY,
-													spriteFrame->sprX, spriteFrame->sprY, spriteFrame->width, spriteFrame->height, entity->rotation,
-													scriptInfo->spriteSheetID);
-									break;
-								case FX_ROTOZOOM:
-									DrawSpriteRotozoom(entity->direction, charxpos, charypos, -spriteFrame->pivotX, -spriteFrame->pivotY,
-													spriteFrame->sprX, spriteFrame->sprY, spriteFrame->width, spriteFrame->height, entity->rotation,
-													entityScaleX, entityScaleY, scriptInfo->spriteSheetID);
-									break;
-								case FX_INK:
-									switch (entity->inkEffect) {
-										case INK_NONE:
-											DrawSprite(charxpos + spriteFrame->pivotX, charypos + spriteFrame->pivotY,
-													spriteFrame->width, spriteFrame->height, spriteFrame->sprX, spriteFrame->sprY, scriptInfo->spriteSheetID);
-											break;
-										case INK_BLEND:
-											DrawBlendedSprite(charxpos + spriteFrame->pivotX, charypos + spriteFrame->pivotY,
-													spriteFrame->width, spriteFrame->height, spriteFrame->sprX, spriteFrame->sprY, scriptInfo->spriteSheetID);
-											break;
-										case INK_ALPHA:
-											DrawAlphaBlendedSprite(charxpos + spriteFrame->pivotX, charypos + spriteFrame->pivotY,
-													spriteFrame->width, spriteFrame->height, spriteFrame->sprX, spriteFrame->sprY, entity->alpha,
-													scriptInfo->spriteSheetID);
-											break;
-										case INK_ADD:
-											DrawAdditiveBlendedSprite(charxpos + spriteFrame->pivotX, charypos + spriteFrame->pivotY,
-													spriteFrame->width, spriteFrame->height, spriteFrame->sprX, spriteFrame->sprY, entity->alpha,
-													scriptInfo->spriteSheetID);
-											break;
-										case INK_SUB:
-											DrawSubtractiveBlendedSprite(charxpos + spriteFrame->pivotX, charypos + spriteFrame->pivotY,
-													spriteFrame->width, spriteFrame->height, spriteFrame->sprX, spriteFrame->sprY, entity->alpha,
-													scriptInfo->spriteSheetID);
-											break;
-									}
-									break;
-								case FX_TINT:
-									if (entity->inkEffect == INK_ALPHA) {
-										DrawScaledTintMask(entity->direction, charxpos, charypos, -spriteFrame->pivotX, -spriteFrame->pivotY,
-														entityScaleX, entityScaleY, spriteFrame->width, spriteFrame->height, spriteFrame->sprX,
-														spriteFrame->sprY, scriptInfo->spriteSheetID);
-									}
-									else {
-										DrawSpriteScaled(entity->direction, charxpos, charypos, -spriteFrame->pivotX, -spriteFrame->pivotY,
-														entityScaleX, entityScaleY, spriteFrame->width, spriteFrame->height, spriteFrame->sprX, spriteFrame->sprY,
-														scriptInfo->spriteSheetID);
-									}
-									break;
-								case FX_FLIP:
-									switch (entity->direction) {
-										default:
-										case FLIP_NONE:
-											DrawSpriteFlipped(charxpos + spriteFrame->pivotX, charypos + spriteFrame->pivotY, spriteFrame->width,
-													spriteFrame->height, spriteFrame->sprX, spriteFrame->sprY, FLIP_NONE, scriptInfo->spriteSheetID);
-											break;
-										case FLIP_X:
-											DrawSpriteFlipped(charxpos - spriteFrame->width - spriteFrame->pivotX, charypos + spriteFrame->pivotY,
-													spriteFrame->width, spriteFrame->height, spriteFrame->sprX, spriteFrame->sprY, FLIP_X, scriptInfo->spriteSheetID);
-											break;
-										case FLIP_Y:
-											DrawSpriteFlipped(charxpos + spriteFrame->pivotX, charypos - spriteFrame->height - spriteFrame->pivotY,
-													spriteFrame->width, spriteFrame->height, spriteFrame->sprX, spriteFrame->sprY, FLIP_Y, scriptInfo->spriteSheetID);
-											break;
-										case FLIP_XY:
-											DrawSpriteFlipped(charxpos - spriteFrame->width - spriteFrame->pivotX,
-													charypos - spriteFrame->height - spriteFrame->pivotY, spriteFrame->width, spriteFrame->height,
-													spriteFrame->sprX, spriteFrame->sprY, FLIP_XY, scriptInfo->spriteSheetID);
-											break;
-									}
-									break;
-								default: // FX_ALL
-									DrawSpriteAllFX(entity->direction, charxpos, charypos, -spriteFrame->pivotX, -spriteFrame->pivotY,
-													spriteFrame->sprX, spriteFrame->sprY, spriteFrame->width, spriteFrame->height, entity->rotation,
-													entityScaleX, entityScaleY, scriptInfo->spriteSheetID, entity->alpha, entity->inkEffect, 0);
-									break;
-							}
-							charxpos += spriteFrame->width + scriptEng.operands[4];
-						}
-					}
-					id++;
-				}
-            }
             case FUNC_DRAWMENU:
                 opcodeSize        = 0;
                 textMenuSurfaceNo = scriptInfo->spriteSheetID;
@@ -5965,7 +5772,6 @@ void ProcessScript(int scriptCodeStart, int jumpTableStart, byte scriptEvent)
                 opcodeSize = 0;
                 SetFade(1, scriptEng.operands[0], scriptEng.operands[1], scriptEng.operands[2], scriptEng.operands[3]);
                 break;
-            case FUNC_SETCLASSICFADE:
             case FUNC_SETCLASSICFADEOUT:
                 opcodeSize = 0;
                 SetFade(2, scriptEng.operands[0], scriptEng.operands[1], scriptEng.operands[2], scriptEng.operands[3]);
@@ -6231,7 +6037,6 @@ void ProcessScript(int scriptCodeStart, int jumpTableStart, byte scriptEvent)
                 DrawRectangle(scriptEng.operands[0], scriptEng.operands[1], scriptEng.operands[2], scriptEng.operands[3], scriptEng.operands[4],
                               scriptEng.operands[5], scriptEng.operands[6], scriptEng.operands[7]);
                 break;
-			case FUNC_CLASSICTINT:
 			case FUNC_DRAWCLASSICOUT:
                 opcodeSize = 0;
                 DrawClassicFadeOut(scriptEng.operands[0], scriptEng.operands[1], scriptEng.operands[2], scriptEng.operands[3], scriptEng.operands[4],
@@ -6368,23 +6173,19 @@ void ProcessScript(int scriptCodeStart, int jumpTableStart, byte scriptEvent)
                     SwapMusicTrack(scriptText, scriptEng.operands[1], scriptEng.operands[2], scriptEng.operands[3]);
                 break;
             case FUNC_LOADVIDEO:
-                // cheat to let LoadVideo use the v3 method of choosing audio
-                // while not basically copy-pasting the function
-                scriptEng.operands[1] = GetGlobalVariableByName("Options.Soundtrack") ? 1 : 0;
-                // fallthrough to FUNC_LOADVIDEOAUDIO, no break
-            case FUNC_LOADVIDEOAUDIO:
-                opcodeSize = 0;
-                PauseSound();
-                if (FindStringToken(scriptText, ".rsv", 1) <= -1)
-                    PlayVideoFile(scriptText, scriptEng.operands[1]); // not an rsv
-                else
-                    scriptInfo->spriteSheetID = AddGraphicsFile(scriptText);
-                ResumeSound();
-                break;
-            case FUNC_NEXTVIDEOFRAME:
-                opcodeSize = 0;
-                UpdateVideoFrame();
-                break;
+    scriptEng.operands[1] = GetGlobalVariableByName("Options.Soundtrack") ? 1 : 0;
+    // fallthrough
+case FUNC_LOADVIDEOAUDIO:
+    opcodeSize = 0;
+    if (FindStringToken(scriptText, ".rsv", 1) <= -1)
+        PlayVideoFile(scriptText, scriptEng.operands[1]);
+    else
+        scriptInfo->spriteSheetID = AddGraphicsFile(scriptText);
+    break;
+case FUNC_NEXTVIDEOFRAME:
+    opcodeSize = 0;
+    scriptEng.checkResult = ProcessVideo();
+    break;
             case FUNC_PLAYSFX:
                 opcodeSize = 0;
                 PlaySfx(scriptEng.operands[0], scriptEng.operands[1]);
@@ -6432,14 +6233,6 @@ void ProcessScript(int scriptCodeStart, int jumpTableStart, byte scriptEvent)
             case FUNC_RESUMEALLVOICE:
                 opcodeSize = 0;
                 ResumeAllVoice();
-                break;
-            case FUNC_STOPALLSFX:
-                opcodeSize = 0;
-                StopAllSfx();
-                break;
-            case FUNC_STOPALLVOICE:
-                opcodeSize = 0;
-                StopAllVoice();
                 break;
             case FUNC_SETSFXATTRIBUTES:
                 opcodeSize = 0;
@@ -7270,6 +7063,38 @@ void ProcessScript(int scriptCodeStart, int jumpTableStart, byte scriptEvent)
                 }
 
                 prevControllerCount = currentControllerCount;
+                break;
+            }
+
+            case FUNC_CHECKMOUSEMOVED: {
+                opcodeSize = 0;
+                static int lastMouseX = -1;
+                static int lastMouseY = -1;
+                int mouseX, mouseY;
+
+                SDL_GetMouseState(&mouseX, &mouseY);
+                if (lastMouseX != -1 && lastMouseY != -1 && (mouseX != lastMouseX || mouseY != lastMouseY)) {
+                    scriptEng.checkResult = 1; // Mouse moved
+                } else {
+                    scriptEng.checkResult = 0; // Not moved or first check
+                }
+                lastMouseX = mouseX;
+                lastMouseY = mouseY;
+                opcodeSize = 0;
+                break;
+            }
+
+            case FUNC_CHECKMOUSE1PRESS: {
+                opcodeSize = 0;
+                int mouseState = SDL_GetMouseState(NULL, NULL);
+                scriptEng.checkResult = (mouseState & SDL_BUTTON(SDL_BUTTON_LEFT)) ? 1 : 0;
+                break;
+            }
+
+            case FUNC_CHECKMOUSE2PRESS: {
+                opcodeSize = 0;
+                int mouseState = SDL_GetMouseState(NULL, NULL);
+                scriptEng.checkResult = (mouseState & SDL_BUTTON(SDL_BUTTON_RIGHT)) ? 1 : 0;
                 break;
             }
 
@@ -8746,12 +8571,12 @@ void ProcessScript(int scriptCodeStart, int jumpTableStart, byte scriptEvent)
                     case VAR_STAGEPLAYERLISTPOS: playerListPos = scriptEng.operands[i]; break;
                     case VAR_STAGEDEBUGMODE: debugMode = scriptEng.operands[i]; break;
                     case VAR_STAGEENTITYPOS: objectEntityPos = scriptEng.operands[i]; break;
-                    // v5U does have it here for these 5, but they break... also origins uses camera[] so like
-                    case VAR_SCREENCAMERAENABLED: camera[0].enabled = scriptEng.operands[i]; break;
-                    case VAR_SCREENCAMERATARGET: camera[0].target = scriptEng.operands[i]; break;
-                    case VAR_SCREENCAMERASTYLE: camera[0].style = scriptEng.operands[i]; break;
-                    case VAR_SCREENCAMERAX: camera[0].xpos = scriptEng.operands[i]; break;
-                    case VAR_SCREENCAMERAY: camera[0].ypos = scriptEng.operands[i]; break;
+                    // v5U does have it here for these 5
+                    case VAR_SCREENCAMERAENABLED: camera[curCam].enabled = scriptEng.operands[i]; break;
+                    case VAR_SCREENCAMERATARGET: camera[curCam].target = scriptEng.operands[i]; break;
+                    case VAR_SCREENCAMERASTYLE: camera[curCam].style = scriptEng.operands[i]; break;
+                    case VAR_SCREENCAMERAX: camera[curCam].xpos = scriptEng.operands[i]; break;
+                    case VAR_SCREENCAMERAY: camera[curCam].ypos = scriptEng.operands[i]; break;
                     case VAR_SCREENDRAWLISTSIZE: drawListEntries[arrayVal].listSize = scriptEng.operands[i]; break;
                     case VAR_SCREENXCENTER: break;
                     case VAR_SCREENYCENTER: break;
@@ -8777,7 +8602,7 @@ void ProcessScript(int scriptCodeStart, int jumpTableStart, byte scriptEvent)
                     case VAR_TOUCHSCREENYPOS: break;
                     case VAR_MUSICVOLUME: SetMusicVolume(scriptEng.operands[i]); break;
                     case VAR_MUSICCURRENTTRACK: break;
-                    case VAR_MUSICPOSITION: musicSeekPos = scriptEng.operands[i]; break;
+                    case VAR_MUSICPOSITION: musicPosition = scriptEng.operands[i]; break;
                     case VAR_KEYDOWNUP: keyDown[inputCheck].up = scriptEng.operands[i]; break;
                     case VAR_KEYDOWNDOWN: keyDown[inputCheck].down = scriptEng.operands[i]; break;
                     case VAR_KEYDOWNLEFT: keyDown[inputCheck].left = scriptEng.operands[i]; break;
@@ -8970,9 +8795,6 @@ void ProcessScript(int scriptCodeStart, int jumpTableStart, byte scriptEvent)
                     case VAR_PLAYTIME_HOURS: break;
                     case VAR_PLAYTIME_MINUTES: break;
                     case VAR_PLAYTIME_SECONDS: break;
-                    case VAR_MOUSE_MOVED: break;
-                    case VAR_MOUSE1_PRESSED: break;
-                    case VAR_MOUSE2_PRESSED: break;
                 }
             }
             else if (opcodeType == SCRIPTVAR_INTCONST) { // int constant

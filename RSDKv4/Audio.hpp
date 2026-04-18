@@ -27,10 +27,23 @@
 #define STREAMFILE_COUNT (2)
 #define MIX_BUFFER_SAMPLES (256)
 
+extern bool audioEnabled;
+#if RETRO_USING_SDL2
+#include <SDL.h> // Ensure SDL types are known
+extern SDL_AudioDeviceID audioDevice;
+#endif
+
 #if RETRO_USING_SDL1 || RETRO_USING_SDL2
 
-#define LockAudioDevice()   SDL_LockAudio()
-#define UnlockAudioDevice() SDL_UnlockAudio()
+// If using SDL2, we should use the specific device ID 'audioDevice'
+#if RETRO_USING_SDL2
+#define LockAudioDevice()   if (audioEnabled) SDL_LockAudioDevice(audioDevice)
+#define UnlockAudioDevice() if (audioEnabled) SDL_UnlockAudioDevice(audioDevice)
+#else
+// SDL1 uses the global lock
+#define LockAudioDevice()   if (audioEnabled) SDL_LockAudio()
+#define UnlockAudioDevice() if (audioEnabled) SDL_UnlockAudio()
+#endif
 
 #else
 #define LockAudioDevice()   ;
@@ -104,7 +117,6 @@ extern bool musicEnabled;
 extern int musicStatus;
 extern int musicStartPos;
 extern int musicPosition;
-extern int musicSeekPos;
 extern int musicRatio;
 extern TrackInfo musicTracks[TRACK_COUNT];
 
@@ -310,9 +322,21 @@ inline void ResumeSound()
         musicStatus = MUSIC_PLAYING;
 }
 
-void StopAllSfx();
-void StopAllVoice();
+inline void StopAllSfx()
+{
+#if !RETRO_USE_ORIGINAL_CODE
+    LockAudioDevice();
+#endif
 
+    for (int i = 0; i < CHANNEL_COUNT; ++i) {
+        sfxChannels[i].sfxID = -1;
+        sfxChannels[i].paused = false;
+    }
+
+#if !RETRO_USE_ORIGINAL_CODE
+    UnlockAudioDevice();
+#endif
+}
 inline void ReleaseGlobalSfx()
 {
     for (int i = globalSFXCount - 1; i >= 0; --i) {
