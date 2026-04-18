@@ -204,7 +204,7 @@ int InitRenderDevice()
 
     SDL_GL_SetSwapInterval(Engine.vsync ? 1 : 0);
 
-#if RETRO_PLATFORM != RETRO_ANDROID && RETRO_PLATFORM != RETRO_OSX
+#if RETRO_PLATFORM != RETRO_ANDROID && RETRO_PLATFORM != RETRO_OSX && !defined(__EMSCRIPTEN__)
     GLenum err = glewInit();
     if (err != GLEW_OK && err != GLEW_ERROR_NO_GLX_DISPLAY) {
         PrintLog("glew init error:");
