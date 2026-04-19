@@ -105,7 +105,10 @@ void PlayVideoFile(char *filePath, int audioTrack)
         callbacks.close    = videoClose;
         callbacks.userdata = (void *)file;
 #if RETRO_USING_SDL2 && !RETRO_USING_OPENGL
-        videoDecoder = THEORAPLAY_startDecode(&callbacks, /*FPS*/ 30, THEORAPLAY_VIDFMT_IYUV, GetGlobalVariableByName("Options.Soundtrack") ? 1 : 0);
+        // Use RGBA — SDL2's IYUV/YUV texture path silently fails or renders
+        // white on Emscripten's WebGL backend and some Linux SDL2 builds.
+        // RGBA works everywhere and matches the OpenGL path.
+        videoDecoder = THEORAPLAY_startDecode(&callbacks, /*FPS*/ 30, THEORAPLAY_VIDFMT_RGBA, GetGlobalVariableByName("Options.Soundtrack") ? 1 : 0);
 #endif
 
         // TODO: does SDL1.2 support YUV?
@@ -288,14 +291,10 @@ int ProcessVideo()
                 glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, videoVidData->width, videoVidData->height, GL_RGBA, GL_UNSIGNED_BYTE, videoVidData->pixels);
                 glBindTexture(GL_TEXTURE_2D, 0);
 #elif RETRO_USING_SDL2
-                // THEORAPLAY_VIDFMT_IYUV gives planes in Y, U, V order.
-                // The texture is IYUV + STREAMING so SDL_UpdateYUVTexture works correctly.
-                int half_w     = videoVidData->width / 2;
-                const Uint8 *y = (const Uint8 *)videoVidData->pixels;
-                const Uint8 *u = y + (videoVidData->width * videoVidData->height);
-                const Uint8 *v = u + (half_w * (videoVidData->height / 2));
-
-                SDL_UpdateYUVTexture(Engine.videoBuffer, NULL, y, videoVidData->width, u, half_w, v, half_w);
+                // THEORAPLAY_VIDFMT_RGBA gives packed RGBA bytes: [R][G][B][A].
+                // SDL_PIXELFORMAT_ABGR8888 (little-endian) maps to the same byte layout.
+                // Stride = width * 4 bytes per pixel.
+                SDL_UpdateTexture(Engine.videoBuffer, NULL, videoVidData->pixels, videoVidData->width * 4);
 #elif RETRO_USING_SDL1
                 memcpy(Engine.videoBuffer->pixels, videoVidData->pixels, videoVidData->width * videoVidData->height * sizeof(uint));
 #endif
@@ -379,9 +378,9 @@ void SetupVideoBuffer(int width, int height)
     if (!Engine.videoBuffer)
         PrintLog("Failed to create video buffer!");
 #elif RETRO_USING_SDL2
-    // MUST be IYUV (matches THEORAPLAY_VIDFMT_IYUV plane order: Y, U, V).
-    // MUST be STREAMING — SDL_UpdateYUVTexture does not work on TARGET textures.
-    Engine.videoBuffer = SDL_CreateTexture(Engine.renderer, SDL_PIXELFORMAT_IYUV, SDL_TEXTUREACCESS_STREAMING, width, height);
+    // ABGR8888 = bytes [R][G][B][A] on little-endian, matching THEORAPLAY_VIDFMT_RGBA.
+    // STREAMING allows CPU upload via SDL_UpdateTexture every frame.
+    Engine.videoBuffer = SDL_CreateTexture(Engine.renderer, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, width, height);
 
     if (!Engine.videoBuffer)
         PrintLog("Failed to create video buffer!");
@@ -393,14 +392,12 @@ void SetupVideoBuffer(int width, int height)
 void InitVideoBuffer(int width, int height)
 {
 #if !RETRO_USING_OPENGL && RETRO_USING_SDL2 && RETRO_SOFTWARE_RENDER
-    // Clear the YUV texture to black (Y=0, U=V=128) so the first
-    // frame doesn't flash garbage.
-    int size  = width * height;
-    int sizeh = (width / 2) * (height / 2);
-    std::vector<Uint8> frame(size + 2 * sizeh);
-    memset(frame.data(), 0, size);
-    memset(frame.data() + size, 128, 2 * sizeh);
-    SDL_UpdateYUVTexture(Engine.videoBuffer, nullptr, frame.data(), width, frame.data() + size, width / 2, frame.data() + size + sizeh, width / 2);
+    // Clear the RGBA texture to opaque black so the first frame doesn't flash garbage.
+    std::vector<Uint8> frame(width * height * 4, 0);
+    // Set alpha channel to 0xFF (fully opaque) so the texture isn't transparent.
+    for (int i = 3; i < width * height * 4; i += 4)
+        frame[i] = 0xFF;
+    SDL_UpdateTexture(Engine.videoBuffer, nullptr, frame.data(), width * 4);
 #endif
 }
 
