@@ -121,9 +121,15 @@ void PlayVideoFile(char *filePath, int audioTrack)
             PrintLog("Video Decoder Error!");
             return;
         }
+        // SDL_Delay(1) yields to the browser's JS event loop on Emscripten,
+        // giving the THEORAPLAY Web Worker its startup tick so the decoder
+        // can actually run. SDL_Delay is pre-registered in SDL's own Asyncify
+        // exports, so no extra -sASYNCIFY configuration is needed.
         while (!videoVidData) {
             if (!videoVidData)
                 videoVidData = THEORAPLAY_getVideo(videoDecoder);
+            if (!videoVidData)
+                SDL_Delay(1);
         }
         if (!videoVidData) {
             PrintLog("Video Error!");
