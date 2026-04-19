@@ -40,7 +40,7 @@ bool mixFiltersOnJekyll = false;
 GLint defaultFramebuffer = -1;
 GLuint framebufferHiRes  = -1;
 GLuint renderbufferHiRes = -1;
-GLuint videoBuffer       = -1;
+GLuint videoBuffer       = 0;
 #endif
 
 #if !RETRO_USE_ORIGINAL_CODE
@@ -596,6 +596,9 @@ struct DrawVertexCD {
 void FlipScreenVideo()
 {
 #if RETRO_USING_OPENGL
+    if (!videoWidth || !videoHeight || !videoBuffer)
+        return;
+
     // Use the real display dimensions — viewWidth/viewHeight are never assigned.
     int dw = displaySettings.width;
     int dh = displaySettings.height;
@@ -612,13 +615,14 @@ void FlipScreenVideo()
     float x1 = x0 + (vw / dw) * 2.0f;
     float y1 = y0 - (vh / dh) * 2.0f;
 
-    // Plain float position and UV arrays — no DrawVertexCD shorts.
-    // Layout per vertex: [x, y,  u, v]
-    //  0 = top-left, 1 = top-right, 2 = bottom-left, 3 = bottom-right
-    float verts[4][2] = { {x0, y0}, {x1, y0}, {x0, y1}, {x1, y1} };
-    float uvs[4][2]   = { {0.f, 0.f}, {1.f, 0.f}, {0.f, 1.f}, {1.f, 1.f} };
+    // Flat float arrays (avoids any 2D-array layout ambiguity across compilers).
+    // Vertex layout: TL, TR, BL, BR
+    GLfloat verts[8] = { x0, y0,  x1, y0,  x0, y1,  x1, y1 };
+    GLfloat uvs[8]   = { 0.f, 0.f,  1.f, 0.f,  0.f, 1.f,  1.f, 1.f };
     static const GLushort idx[6] = { 2, 1, 0, 2, 3, 1 };
 
+    // Clear to black for letterbox/pillarbox areas.
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
     // Push an identity projection so NDC coords work directly.
@@ -631,11 +635,27 @@ void FlipScreenVideo()
 
     glViewport(displaySettings.offsetX, 0, dw, dh);
 
+    // ---------------------------------------------------------------
+    // Explicitly restore the three GL states that the engine's render
+    // batch may have left in an unknown condition.  Any one of these
+    // being wrong produces a solid-white quad:
+    //
+    //  1. GL_TEXTURE_2D disabled  → quad uses current vertex color
+    //                               (default 1,1,1,1 = white).
+    //  2. Wrong current color     → GL_MODULATE tints / blacks out
+    //                               the texture sample.
+    //  3. GL_COLOR_ARRAY enabled  → stale per-vertex color data from
+    //                               the previous frame's render batch
+    //                               overrides the constant color.
+    // ---------------------------------------------------------------
+    glEnable(GL_TEXTURE_2D);                   // fix 1
     glBindTexture(GL_TEXTURE_2D, videoBuffer);
     glDisable(GL_BLEND);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);        // fix 2
 
     glEnableClientState(GL_VERTEX_ARRAY);
     glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+    glDisableClientState(GL_COLOR_ARRAY);      // fix 3
 
     glVertexPointer(2, GL_FLOAT, 0, verts);
     glTexCoordPointer(2, GL_FLOAT, 0, uvs);
@@ -643,7 +663,6 @@ void FlipScreenVideo()
 
     glDisableClientState(GL_TEXTURE_COORD_ARRAY);
     glDisableClientState(GL_VERTEX_ARRAY);
-
     glBindTexture(GL_TEXTURE_2D, 0);
 
     glMatrixMode(GL_PROJECTION);
