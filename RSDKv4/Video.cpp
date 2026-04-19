@@ -352,7 +352,7 @@ void StopVideoPlayback()
 void SetupVideoBuffer(int width, int height)
 {
 #if RETRO_USING_OPENGL
-    if (videoBuffer > 0) {
+    if (videoBuffer != 0) {
         glDeleteTextures(1, &videoBuffer);
         videoBuffer = 0;
     }
@@ -405,7 +405,7 @@ void CloseVideoBuffer()
 {
     if (videoPlaying == 1) {
 #if RETRO_USING_OPENGL
-        if (videoBuffer > 0) {
+        if (videoBuffer != 0) {
             glDeleteTextures(1, &videoBuffer);
             videoBuffer = 0;
         }
