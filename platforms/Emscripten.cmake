@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 
 project(RetroEngine)
 
-message(STATUS "Configuring for WebAssembly (Emscripten) with OpenGL + pthreads")
+message(STATUS "Configuring for WebAssembly (Emscripten) with OpenGL, no pthreads/SharedArrayBuffer")
 
 # ─── Force-disable PC-only features ───
 set(RETRO_NETWORKING OFF CACHE BOOL "Disabled for Web" FORCE)
@@ -67,9 +67,7 @@ set(EMSCRIPTEN_FLAGS
     -sUSE_SDL_IMAGE=1
     -sUSE_OGG=1
     -sUSE_VORBIS=1
-    -sUSE_PTHREADS=1
     -sEMULATE_FUNCTION_POINTER_CASTS=1
-    -pthread
     -DRETRO_USING_OPENGL=1
     -DRETRO_USE_NETWORKING=0
     -DRSDK_REVISION=3
@@ -82,16 +80,10 @@ set(EMSCRIPTEN_FLAGS
 target_compile_options(RetroEngine PRIVATE ${EMSCRIPTEN_FLAGS})
 
 set(emsc_link_options
-    # Memory — fixed size avoids pthreads+growth slowdown
+    # Memory — fixed size
     -sINITIAL_MEMORY=536870912
     -sMAXIMUM_MEMORY=1073741824
     -sALLOW_MEMORY_GROWTH=1
-    -Wno-pthreads-mem-growth
-
-    # Threading
-    -sUSE_PTHREADS=1
-    -sPTHREAD_POOL_SIZE=4
-    -pthread
 
     # Ports
     -sUSE_SDL=2
